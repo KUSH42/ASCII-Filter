@@ -549,21 +549,22 @@ void DrawBorderWithUpdateLayered(HWND hWnd) {
 				pixels[idx + 1] = 180; // Green
 				pixels[idx + 2] = 0;   // Red
 				pixels[idx + 3] = 1;   // Alpha (1 == nearly transparent, 255 == opaque)
+				continue;
 			}
-			else if (x < 8 || y < 8 || x >= width - 8 || y >= height - 8) {
+			// Extend hit-test area to double the thickness but keep visual thickness unchanged
+			if (x < 8 || y < 8 || x >= width - 8 || y >= height - 8) {
 				// Invisible draggable area
 				pixels[idx + 0] = 0;   // Blue
 				pixels[idx + 1] = 0;   // Green
 				pixels[idx + 2] = 0;   // Red
-				pixels[idx + 3] = 1;   // Alpha (1 == nearly transparent, 255 == opaque)
-			} 
-			else {
-				// Center: fully transparent, mouse input will not register
-				pixels[idx + 0] = 0;   // Blue
-				pixels[idx + 1] = 0;   // Green
-				pixels[idx + 2] = 0;   // Red
-				pixels[idx + 3] = 0;   // Alpha (0 == fully transparent, 255 == opaque)
+				pixels[idx + 3] = 1;   // Alpha (nearly transparent)
+				continue;
 			}
+			// Center: fully transparent, mouse input will not register
+			pixels[idx + 0] = 0;   // Blue
+			pixels[idx + 1] = 0;   // Green
+			pixels[idx + 2] = 0;   // Red
+			pixels[idx + 3] = 0;   // Alpha (0 == fully transparent, 255 == opaque)
 		}
 	}
 
@@ -942,14 +943,14 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 	// We'll guess rowPitch == desktopWidth * 4. 
 	// (In a real app, store rowPitch from the map.)
 	int rowPitch = desktopWidth * 4;
-
+		
 	// Compute the region width and height
 	int regionW = region.right - region.left;
 	int regionH = region.bottom - region.top;
 
 	// Calculate the number of blocks (columns and rows)
 	outCols = (regionW + blockSize - 1) / blockSize; // Ceiling division
-	// TODO: Remove 4x OutputDebugString 
+	// TODO: Remove 4x OutputDebugString
 	if (((regionW + blockSize - 1) / blockSize) % blockSize != 0) {
 		++outCols;
 		wchar_t debugOutput[256]; // Ensure enough space for the debug string
