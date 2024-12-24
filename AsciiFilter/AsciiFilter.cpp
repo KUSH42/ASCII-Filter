@@ -16,22 +16,21 @@ AppGlobals g_App = {
    AppGlobals::HitZone::None
 };
 
-
 //Constants
 static const char* ASCII_GRAYSCALE = " !\"#$ % &\\'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"; // ASCII palette
 const int borderThickness = 4; // Adjust this to match the actual border thickness
 const wchar_t* ASCII_FONT = L"Consolas";
 //Constants for Aspect Ratio
-const int ASCII_BLOCK_SIZE = 8; // Block size for sampling in pixels; width of a character block
+const int ASCII_BLOCK_SIZE = 8; // Block size for sampling in  pixels; width of a character block
 const int blockWidth = ASCII_BLOCK_SIZE;
 float ASCII_CHAR_ASPECT_RATIO = 2.0f; // Example: character width-to-height ratio
 const int blockHeight = static_cast<int>(ASCII_BLOCK_SIZE * ASCII_CHAR_ASPECT_RATIO); // Height adjusted for character aspect ratio
 
 //for triple buffer
 HBITMAP g_buffers[3] = { nullptr, nullptr, nullptr }; // Triple buffers
-HBITMAP g_currentBuffer = nullptr;                   // Current buffer to render to
-int g_bufferIndex = 0;                               // Current buffer index
-HDC g_memoryDC = nullptr;                            // Memory DC for rendering
+HBITMAP g_currentBuffer = nullptr;                    // Current buffer to render to
+int g_bufferIndex = 0;                                // Current buffer index
+HDC g_memoryDC = nullptr;                             // Memory DC for rendering
 
 // A small struct to hold block-based ASCII info
 struct AsciiCell
@@ -127,36 +126,29 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 	int extendedWidth = inputWidth + (2 * borderThickness);
 	int extendedHeight = inputHeight + (2 * borderThickness);
 
-	// Preserve the aspect ratio for the output window, accounting for its frame
-	RECT outputClientRect = { 0, 0, extendedWidth, extendedHeight };
-	AdjustWindowRectEx(&outputClientRect, WS_OVERLAPPEDWINDOW, FALSE, 0); // Use WS_OVERLAPPEDWINDOW styles
-
-	// Calculate number of blocks (ceil division to ensure coverage)
+	// Calculate the dimensions for the output window's client area
 	int outCols = (extendedWidth + blockWidth - 1) / blockWidth;
 	int outRows = (extendedHeight + blockHeight - 1) / blockHeight;
+	int clientWidth = outCols * blockWidth;
+	int clientHeight = outRows * blockHeight;
 
-	// Calculate the size of the output window based on ASCII grid
-	int outputWidth = outCols * blockWidth;
-	int outputHeight = outRows * blockHeight;
+	// Adjust the total window size to match the desired client area
+	RECT desiredClientRect = { 0, 0, clientWidth, clientHeight };
+	AdjustWindowRectEx(&desiredClientRect, WS_OVERLAPPEDWINDOW, FALSE, 0);
+	int totalWidth = desiredClientRect.right - desiredClientRect.left;
+	int totalHeight = desiredClientRect.bottom - desiredClientRect.top;
 
-	// Adjust for the frame of the output window
-	RECT outputRect = { 0, 0, outputWidth, outputHeight };
-	AdjustWindowRectEx(&outputRect, WS_OVERLAPPEDWINDOW, FALSE, 0);
-
-	// Create the ASCII output window
+	// Create the ASCII output window with the adjusted size
 	g_App.hwndOutput = CreateWindowEx(
-		0, // No extended window styles
-		L"OutputWindowClass", // Class name for output window
+		0,                          // Extended window style
+		L"OutputWindowClass",
 		L"ASCII Output",
-		WS_OVERLAPPEDWINDOW, // Window style
-		inputRect.right + 10,
-		inputRect.top, // Position the output window to the right of the input window
-		outputRect.right - outputRect.left,  // Adjusted width
-		outputRect.bottom - outputRect.top,  // Adjusted height		
-		nullptr, // Parent window
-		nullptr, // Menu handle
-		hInstance, // Instance handle
-		nullptr // Additional application data
+		WS_OVERLAPPEDWINDOW,
+		inputRect.right + 10,       // Place next to the input window
+		inputRect.top,              // Align top with input window
+		totalWidth,
+		totalHeight,
+		nullptr, nullptr, hInstance, nullptr
 	);
 	if (!g_App.hwndOutput) {
 		MessageBox(nullptr, L"Failed to create output window", L"Error", MB_ICONERROR);
@@ -625,7 +617,6 @@ void HandleMouseDown(HWND hWnd, LPARAM lParam)
 	g_App.dragStartRect = rc;
 }
 
-
 //------------------------------------------------------------
 void HandleMouseMove(HWND hWnd, LPARAM lParam)
 {
@@ -663,31 +654,35 @@ void HandleMouseMove(HWND hWnd, LPARAM lParam)
 		OutputDebugString(debugMsg);
 	} 
 	else if (g_App.resizing) {
-		// Resize based on the hit zone
+		// Resize the green border based on the hit zone
 		switch (g_App.hitZone) {
-		case AppGlobals::HitZone::Left:       rc.left += dx; break;
-		case AppGlobals::HitZone::Right:      rc.right += dx; break;
-		case AppGlobals::HitZone::Top:        rc.top += dy; break;
-		case AppGlobals::HitZone::Bottom:     rc.bottom += dy; break;
-		case AppGlobals::HitZone::TopLeft:    rc.left += dx; rc.top += dy; break;
-		case AppGlobals::HitZone::TopRight:   rc.right += dx; rc.top += dy; break;
-		case AppGlobals::HitZone::BottomLeft: rc.left += dx; rc.bottom += dy; break;
-		case AppGlobals::HitZone::BottomRight:rc.right += dx; rc.bottom += dy; break;
-		default: break;
+		case AppGlobals::HitZone::Top:         rc.top += dy; break;
+		case AppGlobals::HitZone::Left:        rc.left += dx; break;
+		case AppGlobals::HitZone::Right:       rc.right += dx; break;
+		case AppGlobals::HitZone::Bottom:      rc.bottom += dy; break;
+		case AppGlobals::HitZone::TopLeft:	   rc.left += dx; rc.top += dy; break;
+		case AppGlobals::HitZone::TopRight:    rc.right += dx; rc.top += dy; break;
+		case AppGlobals::HitZone::BottomLeft:  rc.left += dx; rc.bottom += dy; break;
+		case AppGlobals::HitZone::BottomRight: rc.right += dx; rc.bottom += dy; break;
+		default:
+			break;
 		}
 
-		// Ensure minimum size
+		// Enforce minimum size
 		const int minWidth = 60;
 		const int minHeight = 60;
 		if ((rc.right - rc.left) < minWidth) rc.right = rc.left + minWidth;
 		if ((rc.bottom - rc.top) < minHeight) rc.bottom = rc.top + minHeight;
 
-		// Update the input window size
-		SetWindowPos(hWnd, HWND_TOPMOST, rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top, SWP_NOACTIVATE);
+		// Apply the new size to the green border
+		SetWindowPos(hWnd, HWND_TOPMOST, rc.left, rc.top,
+			rc.right - rc.left, rc.bottom - rc.top,
+			SWP_NOACTIVATE);
 
-		// Re-draw the layered border
+		// Redraw the green border
 		DrawBorderWithUpdateLayered(hWnd);
 
+		// Recalculate the size for the output window
 		RECT inputRect;
 		GetWindowRect(g_App.hwndInput, &inputRect);
 		int inputWidth = inputRect.right - inputRect.left;
@@ -697,29 +692,27 @@ void HandleMouseMove(HWND hWnd, LPARAM lParam)
 		int extendedWidth = inputWidth + (2 * borderThickness);
 		int extendedHeight = inputHeight + (2 * borderThickness);
 
-		// Get Rectangle we want to resize to preserve coordinates
-		RECT oldRect;
-		GetWindowRect(g_App.hwndOutput, &oldRect);
+		// Calculate new dimensions for the output window's client area
+		int outCols = (extendedWidth + blockWidth - 1) / blockWidth;
+		int outRows = (extendedHeight + blockHeight - 1) / blockHeight;
+		int clientWidth = outCols * blockWidth;
+		int clientHeight = outRows * blockHeight;
 
-		// Preserve the aspect ratio for the output window, accounting for its frame
-		RECT outputClientRect = { 0, 0, extendedWidth, extendedHeight };
-		AdjustWindowRectEx(&outputClientRect, WS_OVERLAPPEDWINDOW, FALSE, 0); // Use WS_OVERLAPPEDWINDOW styles
+		// Adjust total window size to ensure client area matches desired dimensions
+		RECT desiredClientRect = { 0, 0, clientWidth, clientHeight };
+		AdjustWindowRectEx(&desiredClientRect, WS_OVERLAPPEDWINDOW, FALSE, 0);
+		int totalWidth = desiredClientRect.right - desiredClientRect.left;
+		int totalHeight = desiredClientRect.bottom - desiredClientRect.top;
 
-		// Calculate number of blocks (ceil division to ensure coverage)
-		int outCols = (extendedWidth + 2 * blockWidth - 1) / blockWidth;
-		int outRows = (extendedHeight + 2 * blockHeight - 1) / blockHeight + 1;
-
-		// Calculate the size of the output window based on ASCII grid
-		int outputWidth = outCols * blockWidth;
-		int outputHeight = outRows * blockHeight;
-
-		// Adjust for the frame of the output window
-		RECT outputRect = { 0, 0, outputWidth, outputHeight };
-		AdjustWindowRectEx(&outputRect, WS_OVERLAPPEDWINDOW, FALSE, 0);
-
-		SetWindowPos(g_App.hwndOutput, nullptr, oldRect.left, oldRect.top,
-			outputWidth, outputHeight,
-			SWP_NOZORDER | SWP_NOACTIVATE);
+		// Keep the output window at its current position but adjust its size
+		RECT outputRect;
+		GetWindowRect(g_App.hwndOutput, &outputRect);
+		SetWindowPos(g_App.hwndOutput, nullptr,
+			outputRect.left,                     // Keep current position
+			outputRect.top,                      // Keep current position
+			totalWidth,                          // Adjusted width
+			totalHeight,                         // Adjusted height
+			SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
 		// Reinitialize the buffer for the output frame to match the new size
 		InitializeTripleBuffers(g_App.hwndOutput);
@@ -728,7 +721,7 @@ void HandleMouseMove(HWND hWnd, LPARAM lParam)
 		wchar_t debugMsg[256];
 		swprintf_s(debugMsg, L"Resizing: Input Rect: [%d, %d, %d, %d]\n", rc.left, rc.top, rc.right, rc.bottom);
 		OutputDebugString(debugMsg);
-		swprintf_s(debugMsg, L"Resizing: Output Rect: [%d, %d, %d, %d]\n", outputRect.right - outputRect.left, outputRect.bottom - outputRect.top);
+		swprintf_s(debugMsg, L"Resizing: Output Rect: [%d, %d, %d, %d]\n", outputRect.left, outputRect.top, outputRect.top, outputRect.bottom);
 		OutputDebugString(debugMsg);
 	}
 }
@@ -948,10 +941,13 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 	int regionW = region.right - region.left;
 	int regionH = region.bottom - region.top;
 
-	// Calculate the number of blocks (columns and rows)
-	outCols = (regionW + blockSize - 1) / blockSize; // Ceiling division
+	// Calculate the number of blocks (ceiling division)
+	outCols = (regionW + blockSize - 1) / blockSize;
+	outRows = (regionH + blockHeight - 1) / blockHeight;
+
 	// TODO: Remove 4x OutputDebugString
-	if (((regionW + blockSize - 1) / blockSize) % blockSize != 0) {
+	/* 
+	(((regionW + blockSize - 1) / blockSize) % blockSize != 0) {
 		++outCols;
 		wchar_t debugOutput[256]; // Ensure enough space for the debug string
 		swprintf_s(debugOutput, _countof(debugOutput), L"(regionW + blockSize - 1) / blockSize) %% blockSize = %d\noutCols has been increased\n", ((regionW + blockSize - 1) / blockSize) % blockSize);
@@ -962,7 +958,6 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 		swprintf_s(debugOutput, _countof(debugOutput), L"(regionW + blockSize - 1) / blockSize) %% blockSize = %d\noutCols has NOT been increased\n", ((regionW + blockSize - 1) / blockSize) % blockSize);
 		OutputDebugString(debugOutput);
 	}
-	outRows = (regionH + blockHeight - 1) / blockHeight;
 	if (((regionH + blockHeight - 1) / blockHeight) % blockHeight != 0) {
 		++outRows;
 		wchar_t debugOutput[256]; // Ensure enough space for the debug string
@@ -974,6 +969,7 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 		swprintf_s(debugOutput, _countof(debugOutput), L"regionH + blockHeight - 1) / blockHeight) %% blockHeight = %d\noutRows has NOT been increased\n", ((regionH + blockHeight - 1) / blockHeight) % blockHeight);
 		OutputDebugString(debugOutput);
 	}
+	*/
 
 	asciiOut.resize(outCols * outRows);
 
