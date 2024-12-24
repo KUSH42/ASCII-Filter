@@ -5,15 +5,18 @@
 // ------------------------------------------------------------
 AppGlobals g_App = {
    nullptr,
-   nullptr,   
+   nullptr,
    nullptr,
    nullptr,
    nullptr,
    nullptr,
    false,
-   false, 
+   false,
    { 0, 0 },{ 0, 0, 0, 0 },
-   AppGlobals::HitZone::None
+   AppGlobals::HitZone::None,
+   std::chrono::high_resolution_clock::now(),
+   0,
+   0.0
 };
 
 //Constants
@@ -36,7 +39,8 @@ HDC g_memoryDC = nullptr;                             // Memory DC for rendering
 struct AsciiCell
 {
 	wchar_t ch;
-	COLORREF color;
+	COLORREF textColor;
+	COLORREF bgColor;   // Background color
 };
 
 
@@ -246,8 +250,30 @@ LRESULT CALLBACK WndProcOutputFrame(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 
 	case WM_TIMER:
 		if (wParam == 1) {
-			// Redraw the frame periodically
-			InvalidateRect(hWnd, nullptr, FALSE);
+			{
+				// Scope to avoid issues with auto declarations
+				g_App.frameCounter++;
+
+				// Calculate time elapsed
+				auto currentTime = std::chrono::high_resolution_clock::now();
+				auto elapsed = std::chrono::duration_cast<std::chrono::duration<double>>(currentTime - g_App.lastTime);
+
+				if (elapsed.count() >= 1.0) {
+					// Update FPS
+					g_App.fps.store(static_cast<double>(g_App.frameCounter) / elapsed.count());
+					g_App.frameCounter = 0;
+					g_App.lastTime = currentTime;
+
+					// Update the window title
+					wchar_t title[256];
+					double fpsValue = g_App.fps.load();
+					swprintf_s(title, sizeof(title) / sizeof(title[0]), L"ASCII Output - FPS: %.2f", fpsValue);
+					SetWindowText(g_App.hwndOutput, title);
+				}
+
+				// Trigger a redraw
+				InvalidateRect(hWnd, nullptr, FALSE);
+			}
 		}
 		return 0;
 
@@ -822,7 +848,6 @@ void DrawAsciiOutput(HWND hWnd)
 
 	// Get the input region, including borders
 	RECT capRect = GetBorderWindowRect();
-
 	// Clamp the region to desktop size
 	capRect.left = std::max(0L, capRect.left);
 	capRect.top = std::max(0L, capRect.top);
@@ -831,7 +856,6 @@ void DrawAsciiOutput(HWND hWnd)
 
 	// Select the current buffer into the memory DC
 	HBITMAP oldBitmap = (HBITMAP)SelectObject(g_memoryDC, g_buffers[g_bufferIndex]);
-
 	// Clear the buffer with black
 	RECT clientRect;
 	GetClientRect(hWnd, &clientRect);
@@ -839,8 +863,11 @@ void DrawAsciiOutput(HWND hWnd)
 	FillRect(g_memoryDC, &clientRect, bgBrush);
 	DeleteObject(bgBrush);
 
+	/*
 	// Set text background mode to transparent
 	SetBkMode(g_memoryDC, TRANSPARENT);
+	*/ 
+	SetBkMode(g_memoryDC, OPAQUE); // Allow background color rendering
 
 	// Convert the captured region to ASCII
 	std::vector<AsciiCell> asciiOut;
@@ -853,20 +880,22 @@ void DrawAsciiOutput(HWND hWnd)
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
 		FIXED_PITCH | FF_MODERN, ASCII_FONT
 	);
-	HDC hdc = GetDC(nullptr); // Or your window's DC
 	HFONT oldFont = (HFONT)SelectObject(g_memoryDC, hFont);
 	TEXTMETRIC tm;
+	HDC hdc = GetDC(nullptr); // Or your window's DC
 	GetTextMetrics(hdc, &tm);
 	ASCII_CHAR_ASPECT_RATIO = (float)tm.tmHeight / (float)tm.tmAveCharWidth;
 
 	for (int row = 0; row < outRows; ++row) {
 		for (int col = 0; col < outCols; ++col) {
 			const AsciiCell& cell = asciiOut[row * outCols + col];
-			SetTextColor(g_memoryDC, cell.color);
+
+			// Set text and background colors
+			SetTextColor(g_memoryDC, cell.textColor);
+			SetBkColor(g_memoryDC, cell.bgColor);
 
 			// Create a null-terminated string with the character
 			wchar_t text[2] = { cell.ch, L'\0' };
-			// Pass the string and length
 			TextOut(g_memoryDC, col * blockWidth, row * blockHeight, text, 1);
 		}
 	}
@@ -874,7 +903,6 @@ void DrawAsciiOutput(HWND hWnd)
 	// Restore old font
 	SelectObject(g_memoryDC, oldFont);
 	DeleteObject(hFont);
-
 	// Restore old bitmap
 	SelectObject(g_memoryDC, oldBitmap);
 }
@@ -930,12 +958,10 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 	std::vector<AsciiCell>& asciiOut,
 	int& outCols, int& outRows)
 {
+	// TODO:Implement this proper
 	// frameData is typically in BGRA or RGBA layout depending on driver,
 	// but usually it's BGRA with rowPitch >= desktopWidth * 4.
-
-	// We'll guess rowPitch == desktopWidth * 4. 
-	// (In a real app, store rowPitch from the map.)
-	int rowPitch = desktopWidth * 4;
+	int rowPitch = desktopWidth * 4; //Assume 
 		
 	// Compute the region width and height
 	int regionW = region.right - region.left;
@@ -944,32 +970,6 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 	// Calculate the number of blocks (ceiling division)
 	outCols = (regionW + blockSize - 1) / blockSize;
 	outRows = (regionH + blockHeight - 1) / blockHeight;
-
-	// TODO: Remove 4x OutputDebugString
-	/* 
-	(((regionW + blockSize - 1) / blockSize) % blockSize != 0) {
-		++outCols;
-		wchar_t debugOutput[256]; // Ensure enough space for the debug string
-		swprintf_s(debugOutput, _countof(debugOutput), L"(regionW + blockSize - 1) / blockSize) %% blockSize = %d\noutCols has been increased\n", ((regionW + blockSize - 1) / blockSize) % blockSize);
-		OutputDebugString(debugOutput);
-	}
-	else {
-		wchar_t debugOutput[256]; // Ensure enough space for the debug string
-		swprintf_s(debugOutput, _countof(debugOutput), L"(regionW + blockSize - 1) / blockSize) %% blockSize = %d\noutCols has NOT been increased\n", ((regionW + blockSize - 1) / blockSize) % blockSize);
-		OutputDebugString(debugOutput);
-	}
-	if (((regionH + blockHeight - 1) / blockHeight) % blockHeight != 0) {
-		++outRows;
-		wchar_t debugOutput[256]; // Ensure enough space for the debug string
-		swprintf_s(debugOutput, _countof(debugOutput), L"regionH + blockHeight - 1) / blockHeight) %% blockHeight = %d\noutRows has been increased\n", ((regionH + blockHeight - 1) / blockHeight) % blockHeight);
-		OutputDebugString(debugOutput);
-	}
-	else {
-		wchar_t debugOutput[256]; // Ensure enough space for the debug string
-		swprintf_s(debugOutput, _countof(debugOutput), L"regionH + blockHeight - 1) / blockHeight) %% blockHeight = %d\noutRows has NOT been increased\n", ((regionH + blockHeight - 1) / blockHeight) % blockHeight);
-		OutputDebugString(debugOutput);
-	}
-	*/
 
 	asciiOut.resize(outCols * outRows);
 
@@ -999,7 +999,19 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 				BYTE avgG = sumG / count;
 				BYTE avgB = sumB / count;
 				float intensity = 0.299f * avgR + 0.587f * avgG + 0.114f * avgB;
+				
+				// Determine text color (inverse of background color for better contrast)
+				COLORREF bgColor = RGB(avgR, avgG, avgB);
+				COLORREF textColor = RGB(255 - avgR, 255 - avgG, 255 - avgB);
 
+				// Calculate ASCII character based on intensity
+				long asciiIndex = static_cast<long>(intensity * (strlen(ASCII_GRAYSCALE) - 1) / 255.f);
+				wchar_t asciiChar = static_cast<wchar_t>(ASCII_GRAYSCALE[asciiIndex]);
+
+				// Store the ASCII cell
+				asciiOut[row * outCols + col] = { asciiChar, textColor, bgColor };
+
+				/*
 				// Calculate the index in the ASCII grayscale palette
 				long asciiIndex = static_cast<long>(intensity * (strlen(ASCII_GRAYSCALE) - 1) / 255.f);
 
@@ -1008,6 +1020,7 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 
 				// Store the cell
 				asciiOut[row * outCols + col] = { asciiChar, RGB(avgR, avgG, avgB) };
+				*/
 			}
 		}
 	}

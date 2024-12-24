@@ -10,7 +10,7 @@
 #include <vector>
 #include <string>
 #include <cstdio>
-#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <dxgi1_2.h>
 #include <d3d11.h>
@@ -38,6 +38,9 @@ struct AppGlobals
     // Keep track which edge/corner is grabbed
     enum class HitZone { None, Left, Right, Top, Bottom, TopLeft, TopRight, BottomLeft, BottomRight };
     HitZone hitZone = HitZone::None;
+    std::chrono::high_resolution_clock::time_point lastTime = std::chrono::high_resolution_clock::now();
+    std::atomic<int> frameCounter = 0;
+    std::atomic<double> fps = 0.0;
 };
 
 extern AppGlobals g_App;
