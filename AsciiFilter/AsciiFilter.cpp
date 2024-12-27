@@ -57,6 +57,7 @@ LRESULT CALLBACK WndProcInputFrame(HWND, UINT, WPARAM, LPARAM);
 void InitializeAsciiGrayscalePalette();
 void InitializeHighResolutionTimer();
 void RunMessageLoop();
+void UpdateWindowTitleWithFPS(HWND hwnd, double fps);
 bool InitDesktopDuplication();
 double GetElapsedTime(LARGE_INTEGER start, LARGE_INTEGER end);
 void ReleaseDesktopDuplication();
@@ -265,6 +266,13 @@ void InitializeTripleBuffers(HWND hWnd)
 	ReleaseDC(hWnd, screenDC);
 }
 
+void UpdateWindowTitleWithFPS(HWND hwnd, double fps)
+{
+	wchar_t title[256];
+	swprintf_s(title, _countof(title), L"ASCII Output - FPS: %.2f", fps);
+	SetWindowText(hwnd, title);
+}
+
 // Calculate elapsed time in seconds
 double GetElapsedTime(LARGE_INTEGER start, LARGE_INTEGER end)
 {
@@ -275,9 +283,11 @@ double GetElapsedTime(LARGE_INTEGER start, LARGE_INTEGER end)
 void RunMessageLoop()
 {
 	MSG msg;
-	LARGE_INTEGER timerStart, timerEnd;
+	LARGE_INTEGER timerStart, timerEnd, fpsStart;
+	int frameCount = 0;
 
 	QueryPerformanceCounter(&timerStart);
+	QueryPerformanceCounter(&fpsStart);
 
 	while (GetMessage(&msg, nullptr, 0, 0))
 	{
@@ -292,7 +302,23 @@ void RunMessageLoop()
 		{
 			// Update and redraw logic
 			InvalidateRect(g_App.hwndOutput, nullptr, FALSE);
+			frameCount++;
 			timerStart = timerEnd; // Reset start time
+		}
+
+		// Calculate FPS over 1 second intervals
+		LARGE_INTEGER currentTime;
+		QueryPerformanceCounter(&currentTime);
+		double fpsElapsed = GetElapsedTime(fpsStart, currentTime);
+
+		if (fpsElapsed >= 1.0)
+		{
+			double fps = frameCount / fpsElapsed;
+			UpdateWindowTitleWithFPS(g_App.hwndOutput, fps);
+
+			// Reset for the next interval
+			frameCount = 0;
+			fpsStart = currentTime;
 		}
 	}
 }
