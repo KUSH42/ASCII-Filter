@@ -942,17 +942,25 @@ void DrawAsciiOutput(HWND hWnd)
 
 	// Select the current buffer into the memory DC
 	HBITMAP oldBitmap = (HBITMAP)SelectObject(g_memoryDC, g_buffers[g_bufferIndex]);
-	// Clear the buffer with black
+
+	// Clear only the parts of the buffer that require it
 	RECT clientRect;
 	GetClientRect(hWnd, &clientRect);
-	HBRUSH bgBrush = CreateSolidBrush(RGB(0, 0, 0));
-	FillRect(g_memoryDC, &clientRect, bgBrush);
-	DeleteObject(bgBrush);
+	static RECT previousRect = { 0, 0, 0, 0 };
 
-	/*
-	// Set text background mode to transparent
-	SetBkMode(g_memoryDC, TRANSPARENT);
-	*/
+	if (!EqualRect(&clientRect, &previousRect)) {
+		// Only clear the areas that changed since the last frame
+		HRGN diffRegion = CreateRectRgnIndirect(&clientRect);
+		CombineRgn(diffRegion, diffRegion, CreateRectRgnIndirect(&previousRect), RGN_DIFF);
+
+		HBRUSH bgBrush = CreateSolidBrush(RGB(0, 0, 0));
+		FillRgn(g_memoryDC, diffRegion, bgBrush);
+		DeleteObject(bgBrush);
+		DeleteObject(diffRegion);
+
+		previousRect = clientRect; // Update the previous rect
+	}
+
 	SetBkMode(g_memoryDC, OPAQUE); // Allow background color rendering
 
 	// Convert the captured region to ASCII
@@ -960,7 +968,7 @@ void DrawAsciiOutput(HWND hWnd)
 	int outCols = 0, outRows = 0;
 	ConvertRegionToAscii(frameData, desktopWidth, desktopHeight, capRect, ASCII_BLOCK_SIZE, asciiOut, outCols, outRows);
 
-	// Draw ASCII output
+	// Prepare font
 	HFONT hFont = CreateFont(
 		16, 8, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, OEM_CHARSET,
 		OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
@@ -1008,10 +1016,9 @@ void DrawAsciiOutput(HWND hWnd)
 		}
 	}
 
-	// Restore old font
+	// Restore and bitmap
 	SelectObject(g_memoryDC, oldFont);
-	DeleteObject(hFont);
-	// Restore old bitmap
+	DeleteObject(hFont); 
 	SelectObject(g_memoryDC, oldBitmap);
 }
 
