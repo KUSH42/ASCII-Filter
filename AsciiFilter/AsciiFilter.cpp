@@ -43,12 +43,22 @@ struct AsciiCell
 	COLORREF bgColor;   // Background color
 };
 
+// For precomputing the ASCII-grayscale palette
+static wchar_t intensityToAscii[256];
+static bool initialized = false;
+
+// Global variable to store the high-resolution timer frequency
+static LARGE_INTEGER g_PerfFrequency = { 0 };
 
 // Forward declarations
 LRESULT CALLBACK WndProcOutputFrame(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK WndProcInputFrame(HWND, UINT, WPARAM, LPARAM);
 
+void InitializeAsciiGrayscalePalette();
+void InitializeHighResolutionTimer();
+void RunMessageLoop();
 bool InitDesktopDuplication();
+double GetElapsedTime(LARGE_INTEGER start, LARGE_INTEGER end);
 void ReleaseDesktopDuplication();
 void CaptureFrame(std::vector<BYTE>& frameData, int& fullWidth, int& fullHeight);
 void DrawBorderWithUpdateLayered(HWND hWnd);
@@ -169,19 +179,37 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 		return 0;
 	}
 
-	// 5) Timer ~30 FPS
-	SetTimer(g_App.hwndOutput, 1, 33, nullptr);
+	// 5) Initialize high-performance timer
+	InitializeHighResolutionTimer();
 
-	// 6) Message loop
-	MSG msg;
-	while (GetMessage(&msg, nullptr, 0, 0)) {
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-	}
+	// 6) Precompute ASCII-grayscale pallette
+	InitializeAsciiGrayscalePalette();
+
+	// 7) Run message loop
+	RunMessageLoop();
 
 	// Cleanup
 	ReleaseDesktopDuplication();
-	return (int)msg.wParam;
+	
+	return 0;
+}
+
+void InitializeAsciiGrayscalePalette() {
+	for (int i = 0; i < 256; ++i) {
+		long asciiIndex = static_cast<long>(i * (strlen(ASCII_GRAYSCALE) - 1) / 255.0f);
+		intensityToAscii[i] = static_cast<wchar_t>(ASCII_GRAYSCALE[asciiIndex]);
+	}
+	initialized = true;
+	OutputDebugString(L"ASCII-grayscale Palette has been initialized\n");
+}
+
+void InitializeHighResolutionTimer()
+{
+    if (!QueryPerformanceFrequency(&g_PerfFrequency)) {
+        MessageBox(nullptr, L"High-resolution timer not supported.", L"Error", MB_ICONERROR);
+        exit(EXIT_FAILURE);
+    }
+    OutputDebugString(L"High-resolution timer initialized.\n");
 }
 
 void InitializeTripleBuffers(HWND hWnd)
@@ -235,6 +263,38 @@ void InitializeTripleBuffers(HWND hWnd)
 
 	// Release the screen DC
 	ReleaseDC(hWnd, screenDC);
+}
+
+// Calculate elapsed time in seconds
+double GetElapsedTime(LARGE_INTEGER start, LARGE_INTEGER end)
+{
+	return static_cast<double>(end.QuadPart - start.QuadPart) / g_PerfFrequency.QuadPart;
+}
+
+// Example usage of the timer for frame timing
+void RunMessageLoop()
+{
+	MSG msg;
+	LARGE_INTEGER timerStart, timerEnd;
+
+	QueryPerformanceCounter(&timerStart);
+
+	while (GetMessage(&msg, nullptr, 0, 0))
+	{
+		TranslateMessage(&msg);
+		DispatchMessage(&msg);
+
+		// Calculate elapsed time
+		QueryPerformanceCounter(&timerEnd);
+		double elapsed = GetElapsedTime(timerStart, timerEnd);
+
+		if (elapsed >= 1.0 / 60.0) // Target 60 FPS
+		{
+			// Update and redraw logic
+			InvalidateRect(g_App.hwndOutput, nullptr, FALSE);
+			timerStart = timerEnd; // Reset start time
+		}
+	}
 }
 
 //
@@ -521,37 +581,37 @@ void CaptureFrame(std::vector<BYTE>& frameData, int& fullWidth, int& fullHeight)
 // to make a truly see-through center with a 2px green line
 //------------------------------------------------------------
 void DrawBorderWithUpdateLayered(HWND hWnd) {
-    RECT rect;
-    GetWindowRect(hWnd, &rect);
-    int width = rect.right - rect.left;
-    int height = rect.bottom - rect.top;
+	RECT rect;
+	GetWindowRect(hWnd, &rect);
+	int width = rect.right - rect.left;
+	int height = rect.bottom - rect.top;
 
-    if (width <= 0 || height <= 0) {
-        OutputDebugString(L"Invalid dimensions in DrawBorderWithUpdateLayered\n");
-        return;
-    }
+	if (width <= 0 || height <= 0) {
+		OutputDebugString(L"Invalid dimensions in DrawBorderWithUpdateLayered\n");
+		return;
+	}
 
-    HDC screenDC = GetDC(nullptr);
-    HDC memDC = CreateCompatibleDC(screenDC);
+	HDC screenDC = GetDC(nullptr);
+	HDC memDC = CreateCompatibleDC(screenDC);
 
-    BITMAPINFO bmi = {};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = width;
-    bmi.bmiHeader.biHeight = -height; // Top-down DIB
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+	BITMAPINFO bmi = {};
+	bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+	bmi.bmiHeader.biWidth = width;
+	bmi.bmiHeader.biHeight = -height; // Top-down DIB
+	bmi.bmiHeader.biPlanes = 1;
+	bmi.bmiHeader.biBitCount = 32;
+	bmi.bmiHeader.biCompression = BI_RGB;
 
-    void* pBits = nullptr;
-    HBITMAP hBitmap = CreateDIBSection(screenDC, &bmi, DIB_RGB_COLORS, &pBits, nullptr, 0);
-    if (!hBitmap || !pBits) {
-        OutputDebugString(L"Failed to create DIB section\n");
-        DeleteDC(memDC);
-        ReleaseDC(nullptr, screenDC);
-        return;
-    }
+	void* pBits = nullptr;
+	HBITMAP hBitmap = CreateDIBSection(screenDC, &bmi, DIB_RGB_COLORS, &pBits, nullptr, 0);
+	if (!hBitmap || !pBits) {
+		OutputDebugString(L"Failed to create DIB section\n");
+		DeleteDC(memDC);
+		ReleaseDC(nullptr, screenDC);
+		return;
+	}
 
-    HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, hBitmap);
+	HBITMAP oldBitmap = (HBITMAP)SelectObject(memDC, hBitmap);
 
 	// Initialize the entire bitmap as transparent
 	memset(pBits, 0, width * height * 4); // BGRA, all zero is fully transparent
@@ -678,7 +738,7 @@ void HandleMouseMove(HWND hWnd, LPARAM lParam)
 		GetWindowRect(g_App.hwndOutput, &outputRect);
 		swprintf_s(debugMsg, L"Dragging: Output Rect Unchanged: [%d, %d, %d, %d]\n", outputRect.left, outputRect.top, outputRect.right, outputRect.bottom);
 		OutputDebugString(debugMsg);
-	} 
+	}
 	else if (g_App.resizing) {
 		// Resize the green border based on the hit zone
 		switch (g_App.hitZone) {
@@ -840,11 +900,11 @@ void DrawAsciiOutput(HWND hWnd)
 	int desktopWidth = 0, desktopHeight = 0;
 	CaptureFrame(frameData, desktopWidth, desktopHeight);
 
-    // If no frame data, skip
-    if (frameData.empty() || desktopWidth == 0 || desktopHeight == 0) {
-        OutputDebugString(L"DrawAsciiOutput: No frame data captured\n");
-        return;
-    }
+	// If no frame data, skip
+	if (frameData.empty() || desktopWidth == 0 || desktopHeight == 0) {
+		OutputDebugString(L"DrawAsciiOutput: No frame data captured\n");
+		return;
+	}
 
 	// Get the input region, including borders
 	RECT capRect = GetBorderWindowRect();
@@ -866,7 +926,7 @@ void DrawAsciiOutput(HWND hWnd)
 	/*
 	// Set text background mode to transparent
 	SetBkMode(g_memoryDC, TRANSPARENT);
-	*/ 
+	*/
 	SetBkMode(g_memoryDC, OPAQUE); // Allow background color rendering
 
 	// Convert the captured region to ASCII
@@ -958,16 +1018,18 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 	std::vector<AsciiCell>& asciiOut,
 	int& outCols, int& outRows)
 {
-	// TODO:Implement this proper
-	// frameData is typically in BGRA or RGBA layout depending on driver,
-	// but usually it's BGRA with rowPitch >= desktopWidth * 4.
-	int rowPitch = desktopWidth * 4; //Assume 
+	// Precompute ASCII mapping
+	if (!initialized) {
 		
-	// Compute the region width and height
+	}
+
+	int rowPitch = desktopWidth * 4;
+
+	// Compute region size
 	int regionW = region.right - region.left;
 	int regionH = region.bottom - region.top;
 
-	// Calculate the number of blocks (ceiling division)
+	// Calculate number of blocks
 	outCols = (regionW + blockSize - 1) / blockSize;
 	outRows = (regionH + blockHeight - 1) / blockHeight;
 
@@ -976,13 +1038,13 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 	// Loop through each block
 	for (int row = 0; row < outRows; ++row) {
 		for (int col = 0; col < outCols; ++col) {
-			// Calculate pixel block region
+			// Pixel block region
 			int startX = region.left + col * blockWidth;
 			int startY = region.top + row * blockHeight;
-			int endX = std::min((LONG)startX + blockWidth, region.right);
-			int endY = std::min((LONG)startY + blockHeight, region.bottom);
+			int endX = std::min((long)startX + blockWidth, region.right);
+			int endY = std::min((long)startY + blockHeight, region.bottom);
 
-			// Compute average color within the block
+			// Accumulate color
 			unsigned int sumR = 0, sumG = 0, sumB = 0, count = 0;
 			for (int y = startY; y < endY; ++y) {
 				const BYTE* pixel = frameData.data() + y * rowPitch + startX * 4;
@@ -991,36 +1053,23 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 					sumG += pixel[1];
 					sumR += pixel[2];
 					pixel += 4;
-					++count;
+					count++;
 				}
 			}
+
+			// Calculate average color
 			if (count > 0) {
 				BYTE avgR = sumR / count;
 				BYTE avgG = sumG / count;
 				BYTE avgB = sumB / count;
-				float intensity = 0.299f * avgR + 0.587f * avgG + 0.114f * avgB;
-				
-				// Determine text color (inverse of background color for better contrast)
-				COLORREF bgColor = RGB(avgR, avgG, avgB);
-				COLORREF textColor = RGB(255 - avgR, 255 - avgG, 255 - avgB);
+				BYTE intensity = static_cast<BYTE>(0.299f * avgR + 0.587f * avgG + 0.114f * avgB);
 
-				// Calculate ASCII character based on intensity
-				long asciiIndex = static_cast<long>(intensity * (strlen(ASCII_GRAYSCALE) - 1) / 255.f);
-				wchar_t asciiChar = static_cast<wchar_t>(ASCII_GRAYSCALE[asciiIndex]);
-
-				// Store the ASCII cell
-				asciiOut[row * outCols + col] = { asciiChar, textColor, bgColor };
-
-				/*
-				// Calculate the index in the ASCII grayscale palette
-				long asciiIndex = static_cast<long>(intensity * (strlen(ASCII_GRAYSCALE) - 1) / 255.f);
-
-				// Fix: Convert the char to wchar_t
-				wchar_t asciiChar = static_cast<wchar_t>(ASCII_GRAYSCALE[asciiIndex]);
-
-				// Store the cell
-				asciiOut[row * outCols + col] = { asciiChar, RGB(avgR, avgG, avgB) };
-				*/
+				// Populate AsciiCell
+				asciiOut[row * outCols + col] = {
+					intensityToAscii[intensity], // Character
+					RGB(255 - avgR, 255 - avgG, 255 - avgB), // Text color (inverse)
+					RGB(avgR, avgG, avgB) // Background color
+				};
 			}
 		}
 	}
