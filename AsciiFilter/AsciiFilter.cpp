@@ -967,22 +967,44 @@ void DrawAsciiOutput(HWND hWnd)
 		FIXED_PITCH | FF_MODERN, ASCII_FONT
 	);
 	HFONT oldFont = (HFONT)SelectObject(g_memoryDC, hFont);
+	
 	TEXTMETRIC tm;
 	HDC hdc = GetDC(nullptr); // Or your window's DC
 	GetTextMetrics(hdc, &tm);
 	ASCII_CHAR_ASPECT_RATIO = (float)tm.tmHeight / (float)tm.tmAveCharWidth;
 
+	// Draw each row
 	for (int row = 0; row < outRows; ++row) {
+		std::wstring rowBuffer;
+		COLORREF lastTextColor = RGB(255, 255, 255);
+		COLORREF lastBgColor = RGB(0, 0, 0);
+
 		for (int col = 0; col < outCols; ++col) {
 			const AsciiCell& cell = asciiOut[row * outCols + col];
 
-			// Set text and background colors
-			SetTextColor(g_memoryDC, cell.textColor);
-			SetBkColor(g_memoryDC, cell.bgColor);
+			if (rowBuffer.empty()) {
+				// Start the buffer with the initial colors
+				lastTextColor = cell.textColor;
+				lastBgColor = cell.bgColor;
+			}
+			else if (cell.textColor != lastTextColor || cell.bgColor != lastBgColor) {
+				// Flush the current buffer when colors change
+				SetTextColor(g_memoryDC, lastTextColor);
+				SetBkColor(g_memoryDC, lastBgColor);
+				TextOut(g_memoryDC, col * blockWidth - static_cast<int>(rowBuffer.length()) * blockWidth, row * blockHeight, rowBuffer.c_str(), rowBuffer.length());
+				rowBuffer.clear();
+				lastTextColor = cell.textColor;
+				lastBgColor = cell.bgColor;
+			}
+			// Add character to buffer
+			rowBuffer += cell.ch;
+		}
 
-			// Create a null-terminated string with the character
-			wchar_t text[2] = { cell.ch, L'\0' };
-			TextOut(g_memoryDC, col * blockWidth, row * blockHeight, text, 1);
+		// Flush the remaining characters in the buffer
+		if (!rowBuffer.empty()) {
+			SetTextColor(g_memoryDC, lastTextColor);
+			SetBkColor(g_memoryDC, lastBgColor);
+			TextOut(g_memoryDC, 0, row * blockHeight, rowBuffer.c_str(), rowBuffer.length());
 		}
 	}
 
@@ -1067,8 +1089,8 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 			// Pixel block region
 			int startX = region.left + col * blockWidth;
 			int startY = region.top + row * blockHeight;
-			int endX = std::min((long)startX + blockWidth, region.right);
-			int endY = std::min((long)startY + blockHeight, region.bottom);
+			int endX = std::min((long) startX + blockWidth, region.right);
+			int endY = std::min((long) startY + blockHeight, region.bottom);
 
 			// Accumulate color
 			unsigned int sumR = 0, sumG = 0, sumB = 0, count = 0;
@@ -1088,13 +1110,20 @@ void ConvertRegionToAscii(const std::vector<BYTE>& frameData,
 				BYTE avgR = sumR / count;
 				BYTE avgG = sumG / count;
 				BYTE avgB = sumB / count;
-				BYTE intensity = static_cast<BYTE>(0.299f * avgR + 0.587f * avgG + 0.114f * avgB);
 
-				// Populate AsciiCell
+				// Calculate intensity and luminance
+				BYTE intensity = static_cast<BYTE>(0.299f * avgR + 0.587f * avgG + 0.114f * avgB);
+				BYTE luminance = static_cast<BYTE>((0.299 * avgR + 0.587 * avgG + 0.114 * avgB));
+
+				// Text color as a dynamic grayscale based on luminance
+				BYTE textGray = (luminance > 128) ? luminance - 80 : luminance + 80; // Ensure contrast
+				COLORREF textColor = RGB(textGray, textGray, textGray);
+
+				// Populate AsciiCell with text and background colors
 				asciiOut[row * outCols + col] = {
 					intensityToAscii[intensity], // Character
-					RGB(255 - avgR, 255 - avgG, 255 - avgB), // Text color (inverse)
-					RGB(avgR, avgG, avgB) // Background color
+					textColor,                   // Dynamic grayscale text color
+					RGB(avgR, avgG, avgB)        // Background color
 				};
 			}
 		}
